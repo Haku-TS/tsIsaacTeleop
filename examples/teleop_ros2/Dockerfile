@@ -109,8 +109,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /opt/isaacteleop
 COPY . /opt/isaacteleop
 
+# Wipe any stale wheels before building:
+#   - `install/` may arrive via `COPY . /opt/isaacteleop` when the host context
+#     contains an extracted build-ubuntu artifact tarball.
+#   - `build/wheels/` lives inside the persistent cmake build cache mount and
+#     accumulates one wheel per VERSION the cache has ever seen; `cmake
+#     --install` copies the entire directory.
+# Either source can pollute find-links with an isaacteleop wheel that is not
+# the one this build just produced.
 RUN --mount=type=cache,target=/opt/isaacteleop/build,id=isaacteleop-teleop-ros2-build-${ROS_DISTRO} \
-    cmake -B build -S . \
+    rm -rf /opt/isaacteleop/install /opt/isaacteleop/build/wheels \
+    && cmake -B build -S . \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/opt/isaacteleop/install \
         -DBUILD_EXAMPLES=OFF \
@@ -173,7 +182,24 @@ ENV BASH_ENV=/usr/local/bin/teleop-env-setup
 RUN echo "source /usr/local/bin/teleop-env-setup" >> /etc/bash.bashrc
 
 # Pre-install Python dependencies so uv run doesn't download at every launch.
-RUN uv sync --no-dev --find-links=/opt/nlopt-wheels
+# Pin isaacteleop to the exact version of the locally-built wheel so the
+# resolver cannot prefer a published PyPI release (whose dep metadata may
+# diverge from what this image was actually built with). Extract the version
+# from the wheel filename rather than hard-coding it.
+RUN set -eu; \
+    echo "== isaacteleop wheels found in find-links =="; \
+    ls -la /opt/isaacteleop/install/wheels/ || true; \
+    wheels=$(ls /opt/isaacteleop/install/wheels/isaacteleop-*.whl 2>/dev/null); \
+    count=$(printf '%s\n' "$wheels" | grep -c .); \
+    if [ "$count" -ne 1 ]; then \
+        echo "ERROR: expected exactly 1 isaacteleop wheel in find-links, found $count:"; \
+        printf '  %s\n' $wheels; \
+        exit 1; \
+    fi; \
+    wheel=$wheels; \
+    version=$(basename "$wheel" | sed -E 's/^isaacteleop-([^-]+)-.*$/\1/'); \
+    echo "== pinning isaacteleop==${version} =="; \
+    uv sync --no-dev --find-links=/opt/nlopt-wheels --upgrade-package "isaacteleop==${version}"
 
 # Use --no-sync because the venv is already provisioned above, and the implicit
 # resync runs without --find-links and fails on aarch64 (no nlopt wheel on PyPI).
