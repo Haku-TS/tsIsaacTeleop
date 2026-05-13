@@ -7,6 +7,9 @@ contract. The first batch (M7a) lands sources that stay GPU-resident
 end-to-end so the teleop hot path never round-trips through host memory.
 """
 
+from .oakd import OakdSource
 from .synthetic import SyntheticSource
+from .v4l2 import V4l2Source
+from .zed import ZedSource
 
-__all__ = ["SyntheticSource"]
+__all__ = ["OakdSource", "SyntheticSource", "V4l2Source", "ZedSource"]
